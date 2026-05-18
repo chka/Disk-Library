@@ -1,0 +1,41 @@
+# Local database and WAL
+disklib.db
+disklib.db-wal
+disklib.db-shm
+*.sqlite
+*.sqlite3
+*.sqlite-journal
+
+# Service control artifacts
+disklib.pid
+disklib.log
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.egg-info/
+.eggs/
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+
+# Virtual envs
+.venv/
+venv/
+env/
+
+# Secrets / local config
+.env
+.env.local
+*.local
+
+# IDEs
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS junk
+.DS_Store
+Thumbs.db

@@ -1,0 +1,303 @@
+{% extends "base.html" %}
+{% block title %}Duplicates — Disk Library{% endblock %}
+{% block content %}
+
+{% macro item_key(i) -%}{"d":{{ i.disk_id }},"p":{{ i.parent_dir|tojson }},"f":{{ i.filename|tojson if i.filename is defined else 'null' }}}{%- endmacro %}
+
+<div class="flex items-baseline justify-between mb-4">
+  <h1 class="text-2xl font-bold text-slate-900">Duplicates</h1>
+  <div class="text-sm text-slate-500">
+    A: {{ exact_movies|length }} · B: {{ samename_movies|length }} · C: {{ similar_movies|length }} · Series: {{ series_dupes|length }}
+  </div>
+</div>
+
+<nav class="mb-6 flex flex-wrap gap-2 text-sm">
+  <a href="#group-a" class="px-3 py-1 rounded bg-emerald-100 text-emerald-700 hover:bg-emerald-200">A · Same name + size</a>
+  <a href="#group-b" class="px-3 py-1 rounded bg-amber-100 text-amber-700 hover:bg-amber-200">B · Same name, different size</a>
+  <a href="#group-c" class="px-3 py-1 rounded bg-blue-100 text-blue-700 hover:bg-blue-200">C · Similar name</a>
+  <a href="#group-series" class="px-3 py-1 rounded bg-purple-100 text-purple-700 hover:bg-purple-200">Series across disks</a>
+</nav>
+
+<div x-data="dupesPage()" class="pb-32">
+
+{# ============================================================ #}
+{# locations table macro — emits trash toggle per row #}
+{# ============================================================ #}
+{% macro locrow(i, fn=None) %}
+  {% set keystr %}{"d":{{ i.disk_id }},"p":{{ i.parent_dir|tojson }},"f":{{ (fn or i.filename)|tojson }}}{% endset %}
+  <tr class="hover:bg-slate-50"
+      data-key="{{ keystr|string|forceescape }}"
+      :class="isSel($el.dataset.key) ? 'bg-rose-50' : ''">
+    <td class="py-1 pr-2 w-8">
+      <button type="button"
+              data-key="{{ keystr|string|forceescape }}"
+              @click="toggle($el.dataset.key)"
+              class="p-1 rounded hover:bg-rose-100 transition"
+              :class="isSel($el.dataset.key) ? 'text-rose-700 bg-rose-50' : 'text-rose-500 hover:text-rose-700'">
+        <svg class="w-3.5 h-3.5" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0"/>
+        </svg>
+      </button>
+    </td>
+    <td class="py-1 pr-3">
+      <a href="{{ url_for('view_disk', disk_id=i.disk_id) }}{% if i.parent_dir %}?path={{ i.parent_dir|urlencode }}{% endif %}"
+         class="text-blue-600 hover:underline font-medium text-xs">{{ i.disk_name }}</a>
+    </td>
+    <td class="py-1 pr-3 mono text-xs text-slate-500">{{ i.parent_dir or '(root)' }}</td>
+    {% if fn is none %}<td class="py-1 pr-3 mono text-xs text-slate-700 truncate max-w-md" title="{{ i.filename }}">{{ i.filename }}</td>{% endif %}
+    <td class="py-1 pr-3 text-right mono text-xs text-slate-500">{{ i.size_bytes|bytes }}</td>
+    <td class="py-1 text-right mono text-xs text-slate-400">{{ i.mtime|mtime }}</td>
+  </tr>
+{% endmacro %}
+
+{% macro group_toggle_btn(items, fn=None) %}
+  {% set keys_arr %}[{% for i in items %}{"d":{{ i.disk_id }},"p":{{ i.parent_dir|tojson }},"f":{{ (fn or i.filename)|tojson }}}{{ ',' if not loop.last }}{% endfor %}]{% endset %}
+  <button type="button"
+          data-keys="{{ keys_arr|string|forceescape }}"
+          @click="toggleGroup($el.dataset.keys)"
+          class="inline-flex items-center gap-1 p-1.5 rounded hover:bg-rose-100 transition"
+          :class="groupAllSelected($el.dataset.keys) ? 'text-rose-700 bg-rose-100 ring-1 ring-rose-300' : 'text-rose-500 hover:text-rose-700'"
+          title="Toggle all locations of this file">
+    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+      <path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0"/>
+    </svg>
+  </button>
+{% endmacro %}
+
+{# ===== GROUP A ===== #}
+<section id="group-a" class="mb-10 scroll-mt-20">
+  <div class="flex items-baseline gap-3 mb-3">
+    <h2 class="text-lg font-semibold text-slate-900">A · Same filename, same size <span class="text-emerald-700">(exact duplicates)</span></h2>
+    <span class="text-xs text-slate-400">{{ exact_movies|length }} group{{ '' if exact_movies|length == 1 else 's' }}</span>
+  </div>
+  {% if exact_movies %}
+    <div class="space-y-3">
+    {% for g in exact_movies %}
+      <div class="bg-white rounded-xl border border-emerald-200 p-4">
+        <div class="flex items-start justify-between gap-3 flex-wrap">
+          <div class="flex items-start gap-2 min-w-0 flex-1">
+            {{ group_toggle_btn(g.instances, g.filename) }}
+            <div class="min-w-0">
+              <div class="font-semibold text-slate-900 mono text-sm break-all">{{ g.filename }}</div>
+              {% if g.meta_title %}
+                <div class="text-xs text-purple-600 mt-0.5">📽 {{ g.meta_title }}{% if g.meta_year %} ({{ g.meta_year }}){% endif %}</div>
+              {% endif %}
+            </div>
+          </div>
+          <div class="text-xs text-slate-500 shrink-0">{{ g.size_bytes|bytes }} · {{ g.instances|length }} copies</div>
+        </div>
+        <table class="w-full text-xs mt-2 ml-7">
+          <tbody class="divide-y divide-slate-100">
+            {% for i in g.instances %}{{ locrow(i, g.filename) }}{% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% endfor %}
+    </div>
+  {% else %}
+    <div class="bg-white rounded-xl border border-dashed border-slate-200 p-6 text-sm text-slate-500">No exact duplicates.</div>
+  {% endif %}
+</section>
+
+{# ===== GROUP B ===== #}
+<section id="group-b" class="mb-10 scroll-mt-20">
+  <div class="flex items-baseline gap-3 mb-3">
+    <h2 class="text-lg font-semibold text-slate-900">B · Same filename, different sizes</h2>
+    <span class="text-xs text-slate-400">{{ samename_movies|length }} group{{ '' if samename_movies|length == 1 else 's' }}</span>
+  </div>
+  {% if samename_movies %}
+    <div class="space-y-3">
+    {% for g in samename_movies %}
+      <div class="bg-white rounded-xl border border-amber-200 p-4">
+        <div class="flex items-start justify-between gap-3 flex-wrap">
+          <div class="flex items-start gap-2 min-w-0 flex-1">
+            {{ group_toggle_btn(g.instances, g.filename) }}
+            <div class="min-w-0">
+              <div class="font-semibold text-slate-900 mono text-sm break-all">{{ g.filename }}</div>
+              {% if g.meta_title %}<div class="text-xs text-purple-600 mt-0.5">📽 {{ g.meta_title }}{% if g.meta_year %} ({{ g.meta_year }}){% endif %}</div>{% endif %}
+            </div>
+          </div>
+          <div class="text-xs text-slate-500 shrink-0">{{ g.instances|length }} copies</div>
+        </div>
+        <table class="w-full text-xs mt-2 ml-7">
+          <tbody class="divide-y divide-slate-100">
+            {% for i in g.instances %}{{ locrow(i, g.filename) }}{% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% endfor %}
+    </div>
+  {% else %}
+    <div class="bg-white rounded-xl border border-dashed border-slate-200 p-6 text-sm text-slate-500">No same-name / different-size matches.</div>
+  {% endif %}
+</section>
+
+{# ===== GROUP C ===== #}
+<section id="group-c" class="mb-10 scroll-mt-20">
+  <div class="flex items-baseline gap-3 mb-3">
+    <h2 class="text-lg font-semibold text-slate-900">C · Similar filename</h2>
+    <span class="text-xs text-slate-400">{{ similar_movies|length }} group{{ '' if similar_movies|length == 1 else 's' }}</span>
+  </div>
+  <div class="text-xs text-slate-500 mb-3">Normalized by stripping resolution / codec / year / release group tags.</div>
+  {% if similar_movies %}
+    <div class="space-y-3">
+    {% for g in similar_movies %}
+      <div class="bg-white rounded-xl border border-blue-200 p-4">
+        <div class="flex items-start justify-between gap-3 flex-wrap">
+          <div class="flex items-start gap-2 min-w-0 flex-1">
+            {{ group_toggle_btn(g.instances) }}
+            <div class="min-w-0">
+              <div class="text-sm">
+                <span class="font-semibold text-blue-700">{{ g.normalized }}</span>
+                <span class="text-slate-400 text-xs ml-2">{{ g.filenames|length }} variants</span>
+              </div>
+              {% if g.meta_title %}<div class="text-xs text-purple-600 mt-0.5">📽 {{ g.meta_title }}{% if g.meta_year %} ({{ g.meta_year }}){% endif %}</div>{% endif %}
+            </div>
+          </div>
+          <div class="text-xs text-slate-500 shrink-0">{{ g.instances|length }} files</div>
+        </div>
+        <table class="w-full text-xs mt-2 ml-7">
+          <tbody class="divide-y divide-slate-100">
+            {% for i in g.instances %}{{ locrow(i) }}{% endfor %}
+          </tbody>
+        </table>
+      </div>
+    {% endfor %}
+    </div>
+  {% else %}
+    <div class="bg-white rounded-xl border border-dashed border-slate-200 p-6 text-sm text-slate-500">No similar-name groups.</div>
+  {% endif %}
+</section>
+
+{# ===== SERIES ===== #}
+<section id="group-series" class="mb-10 scroll-mt-20">
+  <div class="flex items-baseline gap-3 mb-3">
+    <h2 class="text-lg font-semibold text-slate-900">Series across disks</h2>
+    <span class="text-xs text-slate-400">{{ series_dupes|length }} series</span>
+  </div>
+  <div class="text-xs text-slate-500 mb-3">Requires TMDb enrichment (<code class="mono bg-slate-100 px-1 py-0.5 rounded">./enrich.py</code>). Episode-level trash is intentionally not exposed — manage series folders manually from the disk view.</div>
+  {% if series_dupes %}
+    <div class="space-y-3">
+    {% for s in series_dupes %}
+      <div class="bg-white rounded-xl border border-purple-200 p-4">
+        <div class="flex gap-4">
+          {% if s.series.poster_url %}<img src="{{ s.series.poster_url }}" loading="lazy" class="w-20 h-28 object-cover rounded shadow-sm shrink-0">{% endif %}
+          <div class="flex-1 min-w-0">
+            <div class="flex items-baseline justify-between gap-3 flex-wrap">
+              <div>
+                <span class="font-semibold text-slate-900">{{ s.series.title }}</span>
+                {% if s.series.year %}<span class="text-slate-400 text-sm">({{ s.series.year }})</span>{% endif %}
+                {% if s.series.rating %}<span class="text-amber-600 text-xs ml-1">★ {{ "%.1f"|format(s.series.rating) }}</span>{% endif %}
+              </div>
+              <div class="text-xs text-slate-500 shrink-0">{{ s.disks|length }} disks · {{ s.series.file_count }} files</div>
+            </div>
+            {% if s.series.overview %}<div class="text-xs text-slate-500 mt-1 leading-snug line-clamp-2">{{ s.series.overview }}</div>{% endif %}
+            <table class="w-full text-xs mt-3">
+              <thead>
+                <tr class="text-[10px] uppercase text-slate-400">
+                  <th class="text-left py-1 pr-3 font-medium">Disk</th>
+                  <th class="text-left py-1 pr-3 font-medium">Main folder</th>
+                  <th class="text-right py-1 font-medium">Files</th>
+                </tr>
+              </thead>
+              <tbody class="divide-y divide-slate-100">
+              {% for loc in s.disks %}
+                <tr>
+                  <td class="py-1 pr-3">
+                    <a href="{{ url_for('view_disk', disk_id=loc.disk_id) }}{% if loc.root_folder and loc.root_folder != '(root)' %}?path={{ loc.root_folder|urlencode }}{% endif %}"
+                       class="text-blue-600 hover:underline font-medium">{{ loc.disk_name }}</a>
+                  </td>
+                  <td class="py-1 pr-3 mono text-slate-500">{{ loc.root_folder }}</td>
+                  <td class="py-1 text-right mono text-slate-500">{{ loc.file_count }}</td>
+                </tr>
+              {% endfor %}
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </div>
+    {% endfor %}
+    </div>
+  {% else %}
+    <div class="bg-white rounded-xl border border-dashed border-slate-200 p-6 text-sm text-slate-500">No series-level duplicates.</div>
+  {% endif %}
+</section>
+
+{# ===== bottom floating action bar ===== #}
+<div x-show="selected.size > 0" x-cloak
+     x-transition.opacity
+     class="fixed bottom-0 left-0 right-0 bg-white border-t border-slate-200 shadow-lg z-20">
+  <div class="max-w-6xl mx-auto px-6 py-3 flex items-center justify-between gap-4 flex-wrap">
+    <div class="text-sm text-slate-700">
+      <span class="font-semibold text-rose-700" x-text="selected.size"></span> item<span x-show="selected.size !== 1">s</span> queued for deletion
+    </div>
+    <div class="flex items-center gap-2">
+      <button type="button" @click="selected.clear(); selected = new Set(selected);"
+              class="px-3 py-1.5 text-sm text-slate-600 hover:bg-slate-100 rounded">Clear</button>
+      <button type="button" @click="createJob()"
+              :disabled="creating"
+              class="px-4 py-1.5 text-sm bg-rose-600 text-white rounded hover:bg-rose-700 disabled:opacity-50">
+        <span x-show="!creating">Create Job</span>
+        <span x-show="creating" x-cloak>Creating…</span>
+      </button>
+    </div>
+  </div>
+</div>
+
+</div>{# /dupesPage #}
+
+<script>
+function dupesPage() {
+  // Canonicalise object → stable JSON string. Templates emit data attributes
+  // (data-key for single, data-keys for arrays). We re-serialise here so the
+  // Set keys match regardless of whitespace differences from Jinja.
+  const _canon = (s) => { try { return JSON.stringify(JSON.parse(s)); } catch { return s; } };
+  const _canonArr = (s) => {
+    try { return JSON.parse(s).map(o => JSON.stringify(o)); }
+    catch { return []; }
+  };
+  return {
+    selected: new Set(),
+    creating: false,
+    toggle(keyStr) {
+      const k = _canon(keyStr);
+      if (this.selected.has(k)) this.selected.delete(k);
+      else this.selected.add(k);
+      this.selected = new Set(this.selected);
+    },
+    toggleGroup(keysStr) {
+      const ks = _canonArr(keysStr);
+      if (!ks.length) return;
+      const allSel = ks.every(k => this.selected.has(k));
+      if (allSel) ks.forEach(k => this.selected.delete(k));
+      else ks.forEach(k => this.selected.add(k));
+      this.selected = new Set(this.selected);
+    },
+    isSel(keyStr) { return this.selected.has(_canon(keyStr)); },
+    groupAllSelected(keysStr) {
+      const ks = _canonArr(keysStr);
+      if (!ks.length) return false;
+      return ks.every(k => this.selected.has(k));
+    },
+    createJob() {
+      if (this.selected.size === 0 || this.creating) return;
+      const suggested = 'Cleanup ' + new Date().toISOString().slice(0,16).replace('T',' ');
+      const name = prompt('Job name?', suggested);
+      if (name === null) return;
+      this.creating = true;
+      const fd = new FormData();
+      fd.append('name', name.trim());
+      this.selected.forEach(k => fd.append('items', k));
+      fetch('{{ url_for("jobs_create") }}', { method: 'POST', body: fd })
+        .then(r => r.json().then(d => ({ ok: r.ok, data: d })))
+        .then(({ok, data}) => {
+          if (ok) window.location.href = '/jobs/' + data.id;
+          else { alert('Failed: ' + (data.error || 'unknown')); this.creating = false; }
+        })
+        .catch(e => { alert('Network error'); this.creating = false; });
+    },
+  };
+}
+</script>
+
+{% endblock %}

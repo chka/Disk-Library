@@ -1,0 +1,56 @@
+{% extends "base.html" %}
+{% block title %}{{ 'Movies' if kind == 'movie' else 'Series' }} — Disk Library{% endblock %}
+{% block content %}
+
+<div class="flex items-baseline justify-between mb-6">
+  <h1 class="text-2xl font-bold text-slate-900">{{ 'Movies' if kind == 'movie' else 'TV Series' }}</h1>
+  <div class="text-sm text-slate-500">{{ items|length }} title{{ '' if items|length == 1 else 's' }}</div>
+</div>
+
+<div class="mb-6 flex gap-2 text-sm">
+  <a href="{{ url_for('library', type='movie') }}"
+     class="px-3 py-1.5 rounded-md {% if kind == 'movie' %}bg-blue-600 text-white{% else %}bg-white text-slate-600 border border-slate-200 hover:bg-slate-50{% endif %}">Movies</a>
+  <a href="{{ url_for('library', type='series') }}"
+     class="px-3 py-1.5 rounded-md {% if kind == 'series' %}bg-blue-600 text-white{% else %}bg-white text-slate-600 border border-slate-200 hover:bg-slate-50{% endif %}">Series</a>
+</div>
+
+{% if items %}
+<div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-5">
+{% for it in items %}
+  <div class="bg-white rounded-xl border border-slate-200 overflow-hidden hover:border-blue-400 hover:shadow-md transition">
+    <div class="aspect-[2/3] bg-slate-200 relative overflow-hidden">
+      {% if it.poster_url %}
+        <img src="{{ it.poster_url }}" alt="{{ it.title }}" loading="lazy" class="absolute inset-0 w-full h-full object-cover">
+      {% else %}
+        <div class="absolute inset-0 flex items-center justify-center text-slate-400 text-xs px-3 text-center">{{ it.title }}</div>
+      {% endif %}
+      {% if it.rating %}
+        <div class="absolute bottom-2 right-2 bg-black/70 text-amber-300 text-xs font-semibold px-2 py-0.5 rounded">★ {{ "%.1f"|format(it.rating) }}</div>
+      {% endif %}
+    </div>
+    <div class="p-3">
+      <div class="text-sm font-semibold text-slate-900 leading-tight line-clamp-2" title="{{ it.title }}">{{ it.title }}</div>
+      <div class="text-xs text-slate-500 mt-0.5">
+        {% if it.year %}{{ it.year }}{% endif %}
+        {% if it.year and it.file_count %} · {% endif %}
+        {% if it.file_count %}{{ it.file_count }} file{{ '' if it.file_count == 1 else 's' }}{% endif %}
+      </div>
+      <div class="text-[10px] text-slate-400 mt-1 truncate" title="{{ it.disk_names }}">on {{ it.disk_names }}</div>
+      {% if it.overview %}
+        <div class="text-xs text-slate-500 mt-2 leading-snug line-clamp-3">{{ it.overview }}</div>
+      {% endif %}
+      {% if it.imdb_id %}
+        <a href="https://www.imdb.com/title/{{ it.imdb_id }}" target="_blank" rel="noopener"
+           class="inline-block mt-2 text-[10px] text-amber-700 hover:underline">IMDb →</a>
+      {% endif %}
+    </div>
+  </div>
+{% endfor %}
+</div>
+{% else %}
+<div class="bg-white rounded-xl border border-dashed border-slate-300 p-12 text-center text-slate-500">
+  No {{ 'movies' if kind == 'movie' else 'series' }} cataloged yet.
+  <div class="text-sm text-slate-400 mt-2">Run <code class="mono bg-slate-100 px-2 py-0.5 rounded">./enrich.py</code> after scanning to pull metadata from TMDb.</div>
+</div>
+{% endif %}
+{% endblock %}

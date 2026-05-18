@@ -1,0 +1,66 @@
+{% extends "base.html" %}
+{% block title %}Jobs — Disk Library{% endblock %}
+{% block content %}
+
+{% set status_styles = {
+  'pending': 'bg-amber-100 text-amber-700',
+  'partial': 'bg-blue-100 text-blue-700',
+  'done':    'bg-emerald-100 text-emerald-700',
+  'cancelled': 'bg-slate-100 text-slate-600',
+} %}
+
+<div class="flex items-baseline justify-between mb-6">
+  <h1 class="text-2xl font-bold text-slate-900">Jobs</h1>
+  <div class="text-sm text-slate-500">{{ jobs|length }} job{{ '' if jobs|length == 1 else 's' }}</div>
+</div>
+
+<div class="text-xs text-slate-500 mb-4 bg-slate-50 border border-slate-200 rounded p-3">
+  Jobs never run automatically. Open a job and click <em>Run pending</em> on a disk row only when that disk is currently mounted on this system.
+</div>
+
+{% if jobs %}
+<div class="bg-white rounded-xl border border-slate-200 overflow-hidden">
+<table class="w-full text-sm">
+  <thead class="bg-slate-50 border-b border-slate-200">
+    <tr class="text-[10px] uppercase text-slate-500 tracking-wide">
+      <th class="text-left px-6 py-3 font-semibold">Job</th>
+      <th class="text-left px-6 py-3 font-semibold">Created</th>
+      <th class="text-right px-6 py-3 font-semibold">Pending</th>
+      <th class="text-right px-6 py-3 font-semibold">Done</th>
+      <th class="text-right px-6 py-3 font-semibold">Other</th>
+      <th class="text-right px-6 py-3 font-semibold">Total</th>
+      <th class="text-left px-6 py-3 font-semibold">Status</th>
+    </tr>
+  </thead>
+  <tbody class="divide-y divide-slate-100">
+  {% for j in jobs %}
+    {% set cls = status_styles.get(j.status, 'bg-slate-100 text-slate-600') %}
+    <tr class="hover:bg-slate-50">
+      <td class="px-6 py-2.5">
+        <a href="{{ url_for('job_detail', job_id=j.id) }}" class="text-blue-600 hover:underline font-medium">{{ j.name }}</a>
+      </td>
+      <td class="px-6 py-2.5 mono text-xs text-slate-500">{{ j.created_at }}</td>
+      <td class="px-6 py-2.5 text-right mono text-xs">
+        {% if j.pending %}<span class="text-amber-700 font-semibold">{{ j.pending }}</span>{% else %}<span class="text-slate-300">0</span>{% endif %}
+      </td>
+      <td class="px-6 py-2.5 text-right mono text-xs">
+        {% if j.done %}<span class="text-emerald-700 font-semibold">{{ j.done }}</span>{% else %}<span class="text-slate-300">0</span>{% endif %}
+      </td>
+      <td class="px-6 py-2.5 text-right mono text-xs">
+        {% if j.other %}<span class="text-rose-700 font-semibold">{{ j.other }}</span>{% else %}<span class="text-slate-300">0</span>{% endif %}
+      </td>
+      <td class="px-6 py-2.5 text-right mono text-xs text-slate-500">{{ j.total }}</td>
+      <td class="px-6 py-2.5">
+        <span class="text-[10px] font-semibold uppercase tracking-wide px-2 py-1 rounded-full {{ cls }}">{{ j.status }}</span>
+      </td>
+    </tr>
+  {% endfor %}
+  </tbody>
+</table>
+</div>
+{% else %}
+<div class="bg-white rounded-xl border border-dashed border-slate-300 p-12 text-center text-slate-500">
+  No jobs yet. Create one from the <a href="{{ url_for('duplicates') }}" class="text-blue-600 hover:underline">Duplicates</a> page.
+</div>
+{% endif %}
+{% endblock %}
