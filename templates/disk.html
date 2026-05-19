@@ -275,6 +275,33 @@
   {% endfor %}
 </nav>
 
+{% if folder_series %}
+<div class="bg-white rounded-xl border border-slate-200 overflow-hidden mb-4 flex gap-4 p-4">
+  {% if folder_series.poster_url %}
+    <img src="{{ folder_series.poster_url }}" alt="{{ folder_series.title }}" loading="lazy"
+         class="w-20 sm:w-24 rounded object-cover shrink-0 bg-slate-100 self-start" style="aspect-ratio: 2/3;">
+  {% endif %}
+  <div class="flex-1 min-w-0">
+    <div class="flex items-center gap-2 flex-wrap mb-1">
+      <h2 class="text-xl font-bold text-slate-900 leading-tight">{{ folder_series.title }}</h2>
+      {% if folder_series.year %}<span class="text-slate-500">({{ folder_series.year }})</span>{% endif %}
+      <span class="px-2 py-0.5 text-[10px] rounded-full bg-purple-100 text-purple-700 uppercase tracking-wide font-semibold">series</span>
+      {% if folder_series.rating %}<span class="text-amber-600 font-semibold text-sm">★ {{ "%.1f"|format(folder_series.rating) }}</span>{% endif %}
+    </div>
+    {% if folder_series.overview %}
+      <p class="text-sm text-slate-600 leading-snug">{{ folder_series.overview }}</p>
+    {% endif %}
+    <div class="mt-2 flex items-center gap-3 text-xs text-slate-400">
+      {% if folder_series.imdb_id %}
+        <a href="https://www.imdb.com/title/{{ folder_series.imdb_id }}" target="_blank" rel="noopener"
+           class="text-amber-700 hover:underline">IMDb →</a>
+      {% endif %}
+      <span>{{ folder_series.ep_count }} episode{{ '' if folder_series.ep_count == 1 else 's' }} here</span>
+    </div>
+  </div>
+</div>
+{% endif %}
+
 <div class="bg-white rounded-xl border border-slate-200 overflow-hidden">
 {% if subfolders or files %}
 <table class="w-full text-sm">
@@ -317,10 +344,9 @@
           {% endif %}
           <span class="min-w-0">
             <span class="block truncate" title="{{ f.filename }}">{{ f.filename }}</span>
-            {% if f.meta_type %}
+            {% if f.meta_type == 'movie' %}
               <span class="block mt-1 text-xs text-slate-500">
                 <span class="font-semibold text-slate-700">{{ f.meta_title }}</span>{% if f.meta_year %} <span class="text-slate-400">({{ f.meta_year }})</span>{% endif %}
-                {% if f.meta_type == 'series' %}<span class="ml-1 inline-block px-1.5 py-0.5 text-[9px] rounded bg-purple-100 text-purple-700 uppercase tracking-wide">series</span>{% endif %}
                 {% if f.meta_rating %}<span class="ml-1 text-amber-600">★ {{ "%.1f"|format(f.meta_rating) }}</span>{% endif %}
                 {% if f.meta_overview %}
                   <span class="block text-slate-500 mt-0.5 leading-snug line-clamp-2">{{ f.meta_overview }}</span>

@@ -49,6 +49,29 @@ def view_disk(disk_id):
                WHERE disk_id=? AND parent_dir LIKE ? AND parent_dir != ?""",
             (disk_id, prefix + "%", path),
         ).fetchall()
+        # If the current folder (or anything inside it) holds episodes of a
+        # single series, show that series card once at the top instead of
+        # repeating TMDb info next to every episode row.
+        if path:
+            series_q = conn.execute(
+                """SELECT m.id, m.title, m.year, m.overview, m.poster_url,
+                          m.rating, m.imdb_id, COUNT(*) AS ep_count
+                   FROM files f JOIN metadata m ON m.id = f.metadata_id
+                   WHERE f.disk_id=? AND (f.parent_dir=? OR f.parent_dir LIKE ?)
+                         AND m.type='series'
+                   GROUP BY m.id ORDER BY ep_count DESC LIMIT 1""",
+                (disk_id, path, prefix + "%"),
+            ).fetchone()
+        else:
+            series_q = conn.execute(
+                """SELECT m.id, m.title, m.year, m.overview, m.poster_url,
+                          m.rating, m.imdb_id, COUNT(*) AS ep_count
+                   FROM files f JOIN metadata m ON m.id = f.metadata_id
+                   WHERE f.disk_id=? AND f.parent_dir='' AND m.type='series'
+                   GROUP BY m.id ORDER BY ep_count DESC LIMIT 1""",
+                (disk_id,),
+            ).fetchone()
+        folder_series = dict(series_q) if series_q else None
     subfolders = sorted(
         {r["parent_dir"][len(prefix):].split("/", 1)[0] for r in rows if r["parent_dir"][len(prefix):]},
         key=str.lower,
@@ -66,6 +89,7 @@ def view_disk(disk_id):
         files=files,
         subfolders=subfolders,
         crumbs=crumbs,
+        folder_series=folder_series,
     )
 
 
