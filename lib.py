@@ -298,6 +298,19 @@ def probe_disk(mount_point):
     return info
 
 
+# OS metadata that's pure cruft on a cataloged disk — skip at walk time
+# so it never enters the catalog. Extend if other variants show up
+# (.fseventsd, .Trashes, .TemporaryItems, $RECYCLE.BIN, etc.).
+JUNK_DIRS = {".Spotlight-V100"}
+JUNK_FILENAMES = {"thumbs.db", "desktop.ini"}
+
+
+def _is_junk_file(name):
+    if name == ".DS_Store" or name.startswith("._"):
+        return True
+    return name.lower() in JUNK_FILENAMES
+
+
 def _walk_disk(mount_abs, batch_cb, progress_cb=None, batch_size=None):
     """Walk filesystem, deliver batches of (parent_dir, filename, size, mtime) tuples."""
     skip_top = {"/proc", "/sys", "/dev", "/run", "/var/run", "/var/lock"}
@@ -309,11 +322,14 @@ def _walk_disk(mount_abs, batch_cb, progress_cb=None, batch_size=None):
         if any(root == s or root.startswith(s + "/") for s in skip_top):
             dirs[:] = []
             continue
+        dirs[:] = [d for d in dirs if d not in JUNK_DIRS]
         dirs_seen += 1
         rel_root = os.path.relpath(root, mount_abs)
         if rel_root == ".":
             rel_root = ""
         for name in files:
+            if _is_junk_file(name):
+                continue
             full = os.path.join(root, name)
             try:
                 s = os.lstat(full)
@@ -508,11 +524,14 @@ def scan_disk_sync(disk_id, mount_point, progress_cb=None):
             if any(root == s or root.startswith(s + "/") for s in skip_top):
                 dirs[:] = []
                 continue
+            dirs[:] = [d for d in dirs if d not in JUNK_DIRS]
             dirs_seen += 1
             rel_root = os.path.relpath(root, mount_abs)
             if rel_root == ".":
                 rel_root = ""
             for name in files:
+                if _is_mac_junk_file(name):
+                    continue
                 full = os.path.join(root, name)
                 try:
                     s = os.lstat(full)

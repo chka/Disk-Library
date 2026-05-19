@@ -83,9 +83,28 @@ def disk_status(disk_id):
 
 @app.route("/disks/<int:disk_id>/delete", methods=["POST"])
 def delete_disk(disk_id):
+    """Permanently remove a disk: files (cascade), scans (cascade), scan_changes
+    (cascade), job_files for this disk (manual — FK lacks ON DELETE), now-empty
+    jobs, and orphaned metadata rows. For lost / sold / dead disks."""
+    confirm = (request.form.get("confirm_name") or "").strip()
     with db() as conn:
-        conn.execute("DELETE FROM disks WHERE id=?", (disk_id,))
-        conn.commit()
+        disk = conn.execute("SELECT id, name FROM disks WHERE id=?", (disk_id,)).fetchone()
+        if not disk:
+            abort(404)
+        if confirm != disk["name"]:
+            return jsonify({"error": "confirm_name must match the disk name exactly"}), 400
+        conn.execute("BEGIN")
+        try:
+            conn.execute("DELETE FROM job_files WHERE disk_id=?", (disk_id,))
+            conn.execute("""DELETE FROM jobs WHERE id NOT IN
+                            (SELECT DISTINCT job_id FROM job_files)""")
+            conn.execute("DELETE FROM disks WHERE id=?", (disk_id,))
+            conn.execute("""DELETE FROM metadata WHERE id NOT IN
+                            (SELECT metadata_id FROM files WHERE metadata_id IS NOT NULL)""")
+            conn.commit()
+        except Exception:
+            conn.rollback()
+            raise
     return redirect(url_for("index"))
 
 

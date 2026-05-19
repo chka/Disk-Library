@@ -87,8 +87,60 @@
         {{ disk.mount_point }}{% if disk.device %} ← {{ disk.device }}{% endif %}
       </div>
     </div>
-    <span class="text-[10px] font-semibold uppercase tracking-wide px-2 py-1 rounded-full shrink-0 {{ cls }}"
-          x-text="status"></span>
+    <div class="flex items-center gap-2 shrink-0"
+         x-data='{ deleteOpen: false, typed: "", expected: {{ disk.name|tojson }} }'>
+      <button type="button" @click="deleteOpen = true; typed = ''"
+              title="Remove disk from catalog"
+              class="inline-flex items-center gap-1.5 px-2.5 py-1 text-[10px] font-semibold uppercase tracking-wide text-rose-700 bg-rose-50 border border-rose-300 hover:bg-rose-600 hover:text-white hover:border-rose-600 rounded-full transition">
+        <svg class="w-3 h-3" fill="none" viewBox="0 0 24 24" stroke-width="2.5" stroke="currentColor">
+          <path stroke-linecap="round" stroke-linejoin="round" d="m14.74 9-.346 9m-4.788 0L9.26 9m9.968-3.21c.342.052.682.107 1.022.166m-1.022-.165L18.16 19.673a2.25 2.25 0 0 1-2.244 2.077H8.084a2.25 2.25 0 0 1-2.244-2.077L4.772 5.79m14.456 0a48.108 48.108 0 0 0-3.478-.397m-12 .562c.34-.059.68-.114 1.022-.165m0 0a48.11 48.11 0 0 1 3.478-.397m7.5 0v-.916c0-1.18-.91-2.164-2.09-2.201a51.964 51.964 0 0 0-3.32 0c-1.18.037-2.09 1.022-2.09 2.201v.916m7.5 0a48.667 48.667 0 0 0-7.5 0"/>
+        </svg>
+        Remove
+      </button>
+      <span class="text-[10px] font-semibold uppercase tracking-wide px-2 py-1 rounded-full {{ cls }}"
+            x-text="status"></span>
+
+      <div x-show="deleteOpen" x-cloak @keydown.escape.window="deleteOpen = false"
+           class="fixed inset-0 z-50 flex items-center justify-center p-4 bg-slate-900/60"
+           @click.self="deleteOpen = false">
+        <div class="bg-white rounded-xl max-w-md w-full p-6 shadow-2xl border border-rose-200">
+          <div class="flex items-start gap-3 mb-3">
+            <svg class="w-6 h-6 text-rose-600 shrink-0 mt-0.5" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M12 9v3.75m-9.303 3.376c-.866 1.5.217 3.374 1.948 3.374h14.71c1.73 0 2.813-1.874 1.948-3.374L13.949 3.378c-.866-1.5-3.032-1.5-3.898 0L2.697 16.126ZM12 15.75h.007v.008H12v-.008Z"/>
+            </svg>
+            <h3 class="text-lg font-bold text-slate-900">Permanently remove "{{ disk.name }}"?</h3>
+          </div>
+          <p class="text-sm text-slate-600 mb-3">
+            Use only when the disk is <strong>lost, sold, dead, or otherwise gone for good</strong>.
+            The disk itself is not touched, but if it's gone this catalog entry is the last record you have.
+          </p>
+          <ul class="text-xs text-slate-600 mb-4 ml-5 list-disc space-y-0.5">
+            <li><strong>{{ '{:,}'.format(disk.file_count or 0) }}</strong> cataloged file records deleted</li>
+            <li>TMDb enrichment links for this disk's files lost (orphan metadata swept)</li>
+            <li>Scan history and per-scan changesets deleted</li>
+            <li>Pending deletion jobs targeting this disk cleared</li>
+            <li class="text-rose-700"><strong>Cannot be undone.</strong></li>
+          </ul>
+          <p class="text-sm text-slate-600 mb-2">Type the disk name to confirm:</p>
+          <form action="{{ url_for('delete_disk', disk_id=disk.id) }}" method="post">
+            <input type="hidden" name="confirm_name" :value="typed">
+            <input type="text" x-model="typed" autocomplete="off"
+                   x-effect="if (deleteOpen) $nextTick(() => $el.focus())"
+                   :placeholder="expected"
+                   class="w-full px-3 py-2 border border-slate-300 rounded-lg text-sm mono mb-4 focus:ring-2 focus:ring-rose-500 focus:border-rose-500 outline-none">
+            <div class="flex items-center justify-end gap-2">
+              <button type="button" @click="deleteOpen = false"
+                      class="px-4 py-2 text-sm text-slate-700 hover:bg-slate-100 rounded-lg">Cancel</button>
+              <button type="submit" :disabled="typed !== expected"
+                      class="px-4 py-2 text-sm font-semibold rounded-lg text-white transition"
+                      :class="typed === expected ? 'bg-rose-600 hover:bg-rose-700' : 'bg-rose-300 cursor-not-allowed'">
+                Permanently remove
+              </button>
+            </div>
+          </form>
+        </div>
+      </div>
+    </div>
   </div>
 
   <div class="grid grid-cols-2 md:grid-cols-4 gap-4 text-sm">
@@ -120,14 +172,8 @@
     </div>
   {% endif %}
 
-  <div class="mt-5 pt-4 border-t border-slate-100 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-400">
-    <div>
-      {% if disk.scanned_at %}Last scanned {{ disk.scanned_at }}{% else %}Not yet scanned{% endif %}
-    </div>
-    <form action="{{ url_for('delete_disk', disk_id=disk.id) }}" method="post"
-          onsubmit="return confirm('Remove {{ disk.name }} from the catalog? File records will be deleted; the disk itself is untouched.');">
-      <button type="submit" class="text-rose-500 hover:text-rose-700 hover:underline">Remove from catalog</button>
-    </form>
+  <div class="mt-5 pt-4 border-t border-slate-100 text-xs text-slate-400">
+    {% if disk.scanned_at %}Last scanned {{ disk.scanned_at }}{% else %}Not yet scanned{% endif %}
   </div>
 
   {% if disk.scan_status == 'error' and disk.scan_error %}
