@@ -295,7 +295,27 @@ def probe_disk(mount_point):
         target = f"/dev/{parent}" if parent else dev
         info["model"] = _run(["lsblk", "-no", "MODEL", target]) or None
         info["serial"] = _run(["lsblk", "-no", "SERIAL", target]) or None
+
+    mnt = _run(["findmnt", "--target", info["mount_point"], "-no", "TARGET"])
+    info["partition_mount"] = mnt or info["mount_point"]
+    try:
+        info["is_subfolder"] = bool(mnt) and (
+            os.path.realpath(mnt) != os.path.realpath(info["mount_point"])
+        )
+    except OSError:
+        info["is_subfolder"] = False
     return info
+
+
+def effective_serial(info):
+    """Catalog key. Full-disk scan: raw hardware serial (may be None).
+       Subfolder scan: '<serial>:<fullPath>', or 'dev:<device>:<fullPath>' if
+       no hardware serial is available."""
+    if not info.get("is_subfolder"):
+        return info.get("serial")
+    if info.get("serial"):
+        return f"{info['serial']}:{info['mount_point']}"
+    return f"dev:{info.get('device') or '?'}:{info['mount_point']}"
 
 
 # OS metadata that's pure cruft on a cataloged disk — skip at walk time

@@ -4,8 +4,8 @@ import argparse
 import sys
 import time
 
-from lib import (audit_disk_sync, db, fmt_bytes, init_db, probe_disk,
-                 scan_disk_sync, smart_probe, upsert_smart_for_disk)
+from lib import (audit_disk_sync, db, effective_serial, fmt_bytes, init_db,
+                 probe_disk, scan_disk_sync, smart_probe, upsert_smart_for_disk)
 
 
 def yesno(prompt, choices):
@@ -48,18 +48,59 @@ def main():
     print(f"  total  : {fmt_bytes(info.get('total_bytes'))}")
     print(f"  used   : {fmt_bytes(info.get('used_bytes'))}")
     print(f"  free   : {fmt_bytes(info.get('free_bytes'))}")
+    if info.get("is_subfolder"):
+        print(f"  scope  : subfolder of {info['partition_mount']}")
+
+    eff_serial = effective_serial(info)
 
     if not info.get("serial"):
         print()
-        print("warning: serial unavailable — disk will be cataloged by mount path only.",
-              file=sys.stderr)
+        if info.get("is_subfolder"):
+            print(f"warning: serial unavailable — cataloged by device path + folder "
+                  f"({eff_serial}).", file=sys.stderr)
+        else:
+            print("warning: serial unavailable — disk will be cataloged by mount path only.",
+                  file=sys.stderr)
 
     with db() as conn:
         existing = None
-        if info.get("serial"):
+        if eff_serial:
             existing = conn.execute(
-                "SELECT * FROM disks WHERE serial=?", (info["serial"],)
+                "SELECT * FROM disks WHERE serial=?", (eff_serial,)
             ).fetchone()
+
+        if not existing and info.get("is_subfolder") and info.get("serial"):
+            related = conn.execute(
+                "SELECT * FROM disks WHERE serial LIKE ? ORDER BY id",
+                (f"{info['serial']}:%",),
+            ).fetchall()
+            if related:
+                print()
+                print(f"This physical disk (serial {info['serial']}) is already")
+                print(f"cataloged under one or more other paths:")
+                for i, r in enumerate(related, 1):
+                    print(f"  [{i}] {r['name']!r}  ({r['mount_point']})")
+                print(f"You are scanning : {info['mount_point']}")
+                print()
+                print(f"  [n] add as new entry (different scope)")
+                for i, r in enumerate(related, 1):
+                    print(f"  [{i}] update entry #{i} ({r['name']!r}) to the new path")
+                print(f"  [c] cancel")
+                choices = {"n", "c"} | {str(i) for i in range(1, len(related) + 1)}
+                ans = yesno(f"  Choice [{'/'.join(sorted(choices))}]: ", choices)
+                if ans == "c":
+                    print("Cancelled.")
+                    sys.exit(0)
+                if ans != "n":
+                    picked = related[int(ans) - 1]
+                    conn.execute(
+                        "UPDATE disks SET serial=? WHERE id=?",
+                        (eff_serial, picked["id"]),
+                    )
+                    conn.commit()
+                    existing = conn.execute(
+                        "SELECT * FROM disks WHERE id=?", (picked["id"],)
+                    ).fetchone()
 
         if existing:
             chosen = existing["name"]
@@ -116,7 +157,7 @@ def main():
                 """INSERT INTO disks (name, device, model, serial, fs_type, mount_point,
                    total_bytes, free_bytes, used_bytes, scan_status)
                    VALUES (?,?,?,?,?,?,?,?,?,'pending')""",
-                (args.name, info.get("device"), info.get("model"), info.get("serial"),
+                (args.name, info.get("device"), info.get("model"), eff_serial,
                  info.get("fs_type"), info["mount_point"], info.get("total_bytes"),
                  info.get("free_bytes"), info.get("used_bytes")),
             )
