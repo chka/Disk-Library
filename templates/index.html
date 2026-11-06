@@ -30,7 +30,12 @@
     </div>
 
     <div class="space-y-1 text-sm text-slate-500">
-      {% if d.model %}<div class="truncate">{{ d.model }}</div>{% endif %}
+      {% if d.fs_type or d.model %}
+      <div class="flex items-center gap-2 min-w-0">
+        {% if d.fs_type %}<span class="shrink-0 mono text-[10px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 border border-slate-200">{{ d.fs_type }}</span>{% endif %}
+        {% if d.model %}<span class="truncate">{{ d.model }}</span>{% endif %}
+      </div>
+      {% endif %}
       {% if d.serial %}<div class="mono text-xs text-slate-400 truncate">{{ d.serial }}</div>{% endif %}
     </div>
 
@@ -52,6 +57,11 @@
       <span>{{ "{:,}".format(d.file_count or 0) }} files</span>
       {% if d.scanned_at %}<span>scanned {{ d.scanned_at[:10] }}</span>{% endif %}
     </div>
+
+    {% set adv = reserved_advice(d) %}
+    {% if adv and not adv.unknown %}
+      <div class="mt-2 text-xs text-amber-700">{{ adv.bytes|bytes }} reserved for root, reclaimable</div>
+    {% endif %}
 
     {% if d.scan_status == 'error' and d.scan_error %}
       <div class="mt-2 text-xs text-rose-600 truncate">{{ d.scan_error }}</div>

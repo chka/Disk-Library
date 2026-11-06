@@ -9,12 +9,13 @@ from urllib.parse import quote, unquote
 
 from flask import Flask, abort, jsonify, redirect, render_template, request, url_for
 
-from lib import db, fmt_bytes, fmt_mtime, init_db
+from lib import db, fmt_bytes, fmt_mtime, init_db, reserved_advice
 
 app = Flask(__name__)
 app.jinja_env.filters["bytes"] = fmt_bytes
 app.jinja_env.filters["mtime"] = fmt_mtime
 app.jinja_env.filters["urlencode"] = lambda s: quote(s, safe="")
+app.jinja_env.globals["reserved_advice"] = reserved_advice
 
 
 @app.route("/")

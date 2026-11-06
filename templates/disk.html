@@ -78,14 +78,30 @@
         </div>
       </div>
       <div x-show="err" x-cloak x-text="err" class="text-xs text-rose-600 mb-1"></div>
-      <div class="text-sm text-slate-500 space-x-2">
-        {% if disk.model %}<span>{{ disk.model }}</span>{% endif %}
+      <div class="text-sm text-slate-500 flex flex-wrap items-center gap-x-2 gap-y-1">
+        {% if disk.fs_type %}<span class="mono text-[11px] font-semibold uppercase tracking-wide px-1.5 py-0.5 rounded bg-slate-100 text-slate-700 border border-slate-200" title="Filesystem">{{ disk.fs_type }}</span>{% endif %}
+        {% if disk.is_external is not none %}<span class="text-xs text-slate-400">{{ 'external' if disk.is_external else 'internal' }}</span>{% endif %}
+        {% if disk.model %}<span class="text-slate-300">·</span><span>{{ disk.model }}</span>{% endif %}
         {% if disk.serial %}<span class="text-slate-300">·</span><span class="mono text-xs">{{ disk.serial }}</span>{% endif %}
-        {% if disk.fs_type %}<span class="text-slate-300">·</span><span>{{ disk.fs_type }}</span>{% endif %}
       </div>
       <div class="text-xs text-slate-400 mt-1 mono">
         {{ disk.mount_point }}{% if disk.device %} ← {{ disk.device }}{% endif %}
       </div>
+      {% set adv = reserved_advice(disk) %}
+      {% if adv and adv.unknown %}
+      <div class="mt-2 text-xs text-slate-500">{{ disk.fs_type }} reserved space not checked yet. Rescan the disk to measure it.</div>
+      {% elif adv %}
+      <div class="mt-3 max-w-xl rounded-lg border border-amber-300 bg-amber-50 px-3 py-2 text-xs text-amber-900"
+           x-data="{ copied: false }">
+        <div class="mb-1"><strong>{{ adv.bytes|bytes }}</strong> is reserved for root on this {{ disk.fs_type }} disk. A storage disk doesn't need it; set it to 0 to make that space usable:</div>
+        <div class="flex items-center gap-2">
+          <code class="mono flex-1 min-w-0 truncate bg-white border border-amber-200 rounded px-2 py-1 text-amber-950">{{ adv.cmd }}</code>
+          <button type="button" class="shrink-0 px-2 py-1 rounded border border-amber-300 hover:bg-amber-100"
+                  @click='navigator.clipboard.writeText({{ adv.cmd|tojson }}); copied = true; setTimeout(() => copied = false, 1500)'
+                  x-text="copied ? 'copied' : 'copy'"></button>
+        </div>
+      </div>
+      {% endif %}
     </div>
     <div class="flex items-center gap-2 shrink-0"
          x-data='{ deleteOpen: false, typed: "", expected: {{ disk.name|tojson }} }'>

@@ -160,6 +160,9 @@ def init_db():
             ("smart_error", "TEXT"),
             ("smart_checked_at", "TEXT"),
             ("smart_raw_json", "TEXT"),
+            ("fs_uuid", "TEXT"),
+            ("is_external", "INTEGER"),
+            ("reserved_bytes", "INTEGER"),
         ]:
             if col not in disk_cols:
                 conn.execute(f"ALTER TABLE disks ADD COLUMN {col} {ddl}")
@@ -288,6 +291,9 @@ def probe_disk(mount_point):
     info["total_bytes"] = st.f_blocks * st.f_frsize
     info["free_bytes"] = st.f_bavail * st.f_frsize
     info["used_bytes"] = info["total_bytes"] - info["free_bytes"]
+    # Blocks free to root but not to users: the ext* root reservation (plus a
+    # small kernel delalloc pool on ext4, see RESERVED_NOISE_BYTES).
+    info["reserved_bytes"] = (st.f_bfree - st.f_bavail) * st.f_frsize
 
     dev = info.get("device", "")
     if dev.startswith("/dev/"):
@@ -295,6 +301,10 @@ def probe_disk(mount_point):
         target = f"/dev/{parent}" if parent else dev
         info["model"] = _run(["lsblk", "-no", "MODEL", target]) or None
         info["serial"] = _run(["lsblk", "-no", "SERIAL", target]) or None
+        info["fs_uuid"] = _run(["lsblk", "-no", "UUID", dev]) or None
+        hotplug = _run(["lsblk", "-dno", "HOTPLUG", target])
+        tran = _run(["lsblk", "-dno", "TRAN", target])
+        info["is_external"] = int(hotplug == "1" or tran in ("usb", "ieee1394", "thunderbolt"))
 
     mnt = _run(["findmnt", "--target", info["mount_point"], "-no", "TARGET"])
     info["partition_mount"] = mnt or info["mount_point"]
@@ -305,6 +315,25 @@ def probe_disk(mount_point):
     except OSError:
         info["is_subfolder"] = False
     return info
+
+
+EXT_FS = {"ext2", "ext3", "ext4"}
+# ext4 holds back min(2%, 4096 clusters) for delayed allocation regardless of
+# the -m setting, so ~16 MiB shows up as "reserved" even after tune2fs -m 0.
+RESERVED_NOISE_BYTES = 64 * 1024 * 1024
+
+
+def reserved_advice(disk):
+    """For an external ext* disk: returns {'bytes', 'cmd'} if root-reserved
+       blocks are set, {'unknown': True} if never measured, else None."""
+    if (disk["fs_type"] or "").lower() not in EXT_FS or disk["is_external"] == 0:
+        return None
+    if disk["reserved_bytes"] is None:
+        return {"unknown": True}
+    if disk["reserved_bytes"] <= RESERVED_NOISE_BYTES:
+        return None
+    target = f"/dev/disk/by-uuid/{disk['fs_uuid']}" if disk["fs_uuid"] else disk["device"]
+    return {"bytes": disk["reserved_bytes"], "cmd": f"sudo tune2fs -m 0 {target}"}
 
 
 def effective_serial(info):

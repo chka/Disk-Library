@@ -5,7 +5,8 @@ import sys
 import time
 
 from lib import (audit_disk_sync, db, effective_serial, fmt_bytes, init_db,
-                 probe_disk, scan_disk_sync, smart_probe, upsert_smart_for_disk)
+                 probe_disk, reserved_advice, scan_disk_sync, smart_probe,
+                 upsert_smart_for_disk)
 
 
 def yesno(prompt, choices):
@@ -48,6 +49,12 @@ def main():
     print(f"  total  : {fmt_bytes(info.get('total_bytes'))}")
     print(f"  used   : {fmt_bytes(info.get('used_bytes'))}")
     print(f"  free   : {fmt_bytes(info.get('free_bytes'))}")
+    print(f"  external: {'yes' if info.get('is_external') else 'no'}")
+    advice = reserved_advice({k: info.get(k) for k in
+                              ("fs_type", "is_external", "reserved_bytes", "fs_uuid", "device")})
+    if advice and not advice.get("unknown"):
+        print(f"  reserved: {fmt_bytes(advice['bytes'])} held back for root on an external disk")
+        print(f"            reclaim it with: {advice['cmd']}")
     if info.get("is_subfolder"):
         print(f"  scope  : subfolder of {info['partition_mount']}")
 
@@ -139,11 +146,13 @@ def main():
 
             conn.execute(
                 """UPDATE disks SET device=?, mount_point=?, fs_type=?, model=?,
-                   total_bytes=?, free_bytes=?, used_bytes=?, scan_status='pending',
+                   total_bytes=?, free_bytes=?, used_bytes=?, fs_uuid=?,
+                   is_external=?, reserved_bytes=?, scan_status='pending',
                    scan_progress=0, scan_error=NULL WHERE id=?""",
                 (info.get("device"), info["mount_point"], info.get("fs_type"),
                  info.get("model"), info.get("total_bytes"), info.get("free_bytes"),
-                 info.get("used_bytes"), existing["id"]),
+                 info.get("used_bytes"), info.get("fs_uuid"), info.get("is_external"),
+                 info.get("reserved_bytes"), existing["id"]),
             )
             conn.commit()
             disk_id = existing["id"]
@@ -155,11 +164,13 @@ def main():
                 sys.exit(2)
             cur = conn.execute(
                 """INSERT INTO disks (name, device, model, serial, fs_type, mount_point,
-                   total_bytes, free_bytes, used_bytes, scan_status)
-                   VALUES (?,?,?,?,?,?,?,?,?,'pending')""",
+                   total_bytes, free_bytes, used_bytes, fs_uuid, is_external,
+                   reserved_bytes, scan_status)
+                   VALUES (?,?,?,?,?,?,?,?,?,?,?,?,'pending')""",
                 (args.name, info.get("device"), info.get("model"), eff_serial,
                  info.get("fs_type"), info["mount_point"], info.get("total_bytes"),
-                 info.get("free_bytes"), info.get("used_bytes")),
+                 info.get("free_bytes"), info.get("used_bytes"), info.get("fs_uuid"),
+                 info.get("is_external"), info.get("reserved_bytes")),
             )
             disk_id = cur.lastrowid
             conn.commit()
