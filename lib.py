@@ -135,6 +135,25 @@ def init_db():
             );
             CREATE INDEX IF NOT EXISTS idx_job_files_job ON job_files(job_id);
             CREATE INDEX IF NOT EXISTS idx_job_files_disk_pending ON job_files(disk_id, status);
+            CREATE TABLE IF NOT EXISTS smart_history (
+              id INTEGER PRIMARY KEY AUTOINCREMENT,
+              disk_id INTEGER NOT NULL REFERENCES disks(id) ON DELETE CASCADE,
+              checked_at TEXT NOT NULL,
+              available INTEGER NOT NULL,
+              overall TEXT,
+              power_on_hours INTEGER,
+              power_cycles INTEGER,
+              load_cycles INTEGER,
+              temp_c INTEGER,
+              reallocated INTEGER,
+              pending INTEGER,
+              uncorrectable INTEGER,
+              udma_crc INTEGER,
+              ata_errors INTEGER,
+              error TEXT,
+              raw_json TEXT
+            );
+            CREATE INDEX IF NOT EXISTS idx_smart_history_disk ON smart_history(disk_id, checked_at DESC);
         """)
         # idempotent: add columns if upgrading an older DB
         existing_cols = {r[1] for r in conn.execute("PRAGMA table_info(files)")}
@@ -166,6 +185,19 @@ def init_db():
         ]:
             if col not in disk_cols:
                 conn.execute(f"ALTER TABLE disks ADD COLUMN {col} {ddl}")
+        # Seed history with the snapshot already on the disks row for disks
+        # probed before smart_history existed.
+        conn.execute("""
+            INSERT INTO smart_history (disk_id, checked_at, available, overall,
+              power_on_hours, power_cycles, load_cycles, temp_c, reallocated, pending,
+              uncorrectable, udma_crc, ata_errors, error, raw_json)
+            SELECT id, smart_checked_at, smart_available, smart_overall,
+              smart_power_on_hours, smart_power_cycles, smart_load_cycles, smart_temp_c,
+              smart_reallocated, smart_pending, smart_uncorrectable, smart_udma_crc,
+              smart_ata_errors, smart_error, smart_raw_json
+            FROM disks
+            WHERE smart_available = 1 AND smart_checked_at IS NOT NULL
+              AND id NOT IN (SELECT disk_id FROM smart_history)""")
 
 
 def smart_probe(device):
@@ -230,7 +262,8 @@ def smart_probe(device):
 
 
 def upsert_smart_for_disk(disk_id, smart):
-    """Write smart_probe() result into the disks row."""
+    """Write smart_probe() result into the disks row; successful reads are also
+       appended to smart_history so checks can be compared over time."""
     with db() as conn:
         if not smart.get("available"):
             conn.execute(
@@ -239,6 +272,10 @@ def upsert_smart_for_disk(disk_id, smart):
                 (smart.get("error", "unavailable"), disk_id),
             )
         else:
+            counters = (smart.get("power_on_hours"), smart.get("power_cycles"),
+                        smart.get("load_cycles"), smart.get("temp_c"), smart.get("reallocated"),
+                        smart.get("pending"), smart.get("uncorrectable"), smart.get("udma_crc"),
+                        smart.get("ata_errors"))
             conn.execute(
                 """UPDATE disks SET smart_available=1, smart_overall=?, smart_firmware=?,
                    smart_rotation_rpm=?, smart_power_on_hours=?, smart_power_cycles=?,
@@ -247,12 +284,43 @@ def upsert_smart_for_disk(disk_id, smart):
                    smart_error=NULL, smart_checked_at=datetime('now'), smart_raw_json=?
                    WHERE id=?""",
                 (smart["overall"], smart.get("firmware"), smart.get("rotation_rpm"),
-                 smart.get("power_on_hours"), smart.get("power_cycles"),
-                 smart.get("load_cycles"), smart.get("temp_c"), smart.get("reallocated"),
-                 smart.get("pending"), smart.get("uncorrectable"), smart.get("udma_crc"),
-                 smart.get("ata_errors"), smart.get("raw_json"), disk_id),
+                 *counters, smart.get("raw_json"), disk_id),
+            )
+            conn.execute(
+                """INSERT INTO smart_history (disk_id, checked_at, available, overall,
+                   power_on_hours, power_cycles, load_cycles, temp_c, reallocated, pending,
+                   uncorrectable, udma_crc, ata_errors, raw_json)
+                   VALUES (?, datetime('now'), 1, ?,?,?,?,?,?,?,?,?,?,?)""",
+                (disk_id, smart["overall"], *counters, smart.get("raw_json")),
             )
         conn.commit()
+
+
+# Counters where any increase means the disk (or its link) got worse.
+SMART_BAD_IF_RISING = {5, 10, 183, 184, 187, 188, 196, 197, 198, 199}
+
+
+def smart_attributes(raw_json):
+    """ATA attribute table from a stored smartctl -j blob, keyed by attribute id."""
+    if not raw_json:
+        return {}
+    try:
+        data = json.loads(raw_json)
+    except json.JSONDecodeError:
+        return {}
+    out = {}
+    for a in data.get("ata_smart_attributes", {}).get("table", []):
+        out[a["id"]] = {
+            "id": a["id"],
+            "name": a.get("name"),
+            "value": a.get("value"),
+            "worst": a.get("worst"),
+            "thresh": a.get("thresh"),
+            "raw": (a.get("raw") or {}).get("value"),
+            "raw_string": (a.get("raw") or {}).get("string"),
+            "when_failed": a.get("when_failed") or "",
+        }
+    return out
 
 
 VIDEO_EXT = {".mkv", ".mp4", ".avi", ".mov", ".m4v", ".ts", ".mpg", ".mpeg",
@@ -334,6 +402,13 @@ def reserved_advice(disk):
         return None
     target = f"/dev/disk/by-uuid/{disk['fs_uuid']}" if disk["fs_uuid"] else disk["device"]
     return {"bytes": disk["reserved_bytes"], "cmd": f"sudo tune2fs -m 0 {target}"}
+
+
+def hardware_serial(catalog_serial):
+    """Physical drive serial behind a catalog key (see effective_serial)."""
+    if not catalog_serial or catalog_serial.startswith("dev:"):
+        return None
+    return catalog_serial.split(":", 1)[0]
 
 
 def effective_serial(info):

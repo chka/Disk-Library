@@ -9,7 +9,7 @@ import argparse
 import os
 import sys
 
-from lib import db, init_db, smart_probe, upsert_smart_for_disk
+from lib import db, hardware_serial, init_db, smart_probe, upsert_smart_for_disk
 
 
 def main():
@@ -20,22 +20,30 @@ def main():
     with db() as conn:
         if args.disk_id:
             rows = conn.execute(
-                "SELECT id, name, device, mount_point FROM disks WHERE id=?", (args.disk_id,)
+                "SELECT id, name, device, mount_point, serial FROM disks WHERE id=?", (args.disk_id,)
             ).fetchall()
         else:
             rows = conn.execute(
-                "SELECT id, name, device, mount_point FROM disks ORDER BY name COLLATE NOCASE"
+                "SELECT id, name, device, mount_point, serial FROM disks ORDER BY name COLLATE NOCASE"
             ).fetchall()
 
     if not rows:
         sys.exit("no disks in catalog")
 
-    ok = unavailable = 0
+    ok = unavailable = skipped = 0
     for r in rows:
         dev = r["device"]
         mount_alive = r["mount_point"] and os.path.ismount(r["mount_point"])
         print(f"\n[{r['id']}] {r['name']}  device={dev}  mounted={'yes' if mount_alive else 'no'}")
         smart = smart_probe(dev)
+        # Device names are reassigned on every plug-in, so the stored path may
+        # now hold a different disk; never file its SMART under this one.
+        expected = hardware_serial(r["serial"])
+        if smart.get("available") and expected and smart.get("serial") != expected:
+            print(f"  skipped: {smart.get('device')} is now serial {smart.get('serial')}, "
+                  f"not {expected} (disk not attached)")
+            skipped += 1
+            continue
         upsert_smart_for_disk(r["id"], smart)
         if smart.get("available"):
             print(f"  health={smart['overall']}  on={smart.get('power_on_hours')}h"
@@ -46,7 +54,7 @@ def main():
         else:
             print(f"  unavailable: {smart.get('error')}", file=sys.stderr)
             unavailable += 1
-    print(f"\nDone. ok={ok} unavailable={unavailable}")
+    print(f"\nDone. ok={ok} unavailable={unavailable} skipped={skipped}")
 
 
 if __name__ == "__main__":

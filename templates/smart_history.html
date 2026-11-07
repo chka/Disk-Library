@@ -1,0 +1,136 @@
+{% extends "base.html" %}
+{% block title %}SMART history — {{ disk.name }} — Disk Library{% endblock %}
+{% block content %}
+
+{% macro num(v) %}{% if v is none %}—{% elif v is number %}{{ '{:,}'.format(v) }}{% else %}{{ v }}{% endif %}{% endmacro %}
+{% macro delta(d, bad) %}
+  {%- if d -%}
+    <span class="ml-1 text-[11px] {% if bad and d > 0 %}text-rose-600 font-semibold{% else %}text-slate-400{% endif %}">{{ '+' if d > 0 }}{{ '{:,}'.format(d) }}</span>
+  {%- endif -%}
+{% endmacro %}
+
+<div class="mb-4">
+  <a href="{{ url_for('view_disk', disk_id=disk.id) }}" class="text-sm text-slate-500 hover:text-blue-600 inline-flex items-center gap-1">
+    <svg class="w-4 h-4" fill="none" viewBox="0 0 24 24" stroke-width="2" stroke="currentColor">
+      <path stroke-linecap="round" stroke-linejoin="round" d="M15.75 19.5 8.25 12l7.5-7.5"/>
+    </svg>
+    {{ disk.name }}
+  </a>
+</div>
+
+<div class="bg-white rounded-xl border border-slate-200 p-6 mb-6">
+  <div class="flex items-baseline justify-between mb-1">
+    <h1 class="text-2xl font-bold text-slate-900">SMART history</h1>
+    <span class="text-sm text-slate-500">{{ history|length }} check{{ '' if history|length == 1 else 's' }}</span>
+  </div>
+  <div class="text-sm text-slate-500 mb-4">
+    {{ disk.name }}{% if disk.model %} · {{ disk.model }}{% endif %}{% if disk.serial %} · <span class="mono text-xs">{{ disk.serial }}</span>{% endif %}
+  </div>
+
+  {% if history %}
+  <div class="overflow-x-auto">
+    <table class="w-full text-sm">
+      <thead>
+        <tr class="text-[10px] font-semibold text-slate-400 uppercase tracking-wide text-left border-b border-slate-200">
+          <th class="py-2 pr-3">Checked</th>
+          <th class="py-2 pr-3">Health</th>
+          {% for _, label, _ in counters %}<th class="py-2 pr-3 text-right whitespace-nowrap">{{ label }}</th>{% endfor %}
+          <th class="py-2 text-right">Compare</th>
+        </tr>
+      </thead>
+      <tbody>
+      {% for h in history %}
+        <tr class="border-b border-slate-100 {% if new and h.id == new.id %}bg-blue-50{% elif base and h.id == base.id %}bg-slate-50{% endif %}">
+          <td class="py-2 pr-3 mono text-xs whitespace-nowrap">{{ h.checked_at }}</td>
+          <td class="py-2 pr-3">
+            {% if h.available %}
+              <span class="text-[10px] font-semibold uppercase tracking-wide px-2 py-0.5 rounded-full {{ 'bg-emerald-100 text-emerald-700' if h.overall == 'PASSED' else 'bg-rose-100 text-rose-700' }}">{{ h.overall }}</span>
+            {% else %}
+              <span class="text-xs text-slate-400" title="{{ h.error }}">unavailable</span>
+            {% endif %}
+          </td>
+          {% for col, _, bad in counters %}
+            <td class="py-2 pr-3 text-right whitespace-nowrap {% if bad and (h[col] or 0) > 0 %}text-amber-700{% endif %}">
+              {% if h.available %}{{ num(h[col]) }}{{ delta(h.delta.get(col), bad) }}{% endif %}
+            </td>
+          {% endfor %}
+          <td class="py-2 text-right whitespace-nowrap text-xs">
+            {% if h.available %}
+              <a class="text-blue-600 hover:underline" href="{{ url_for('disk_smart_history', disk_id=disk.id, a=h.id, b=base.id if base and base.id != h.id else none) }}">new</a>
+              <span class="text-slate-300">/</span>
+              <a class="text-blue-600 hover:underline" href="{{ url_for('disk_smart_history', disk_id=disk.id, a=new.id, b=h.id) }}">base</a>
+            {% endif %}
+          </td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+  <p class="text-xs text-slate-400 mt-3">Small numbers next to a value are the change since the previous check. Red means a counter that should never rise went up.</p>
+  {% else %}
+    <p class="text-sm text-slate-500">No SMART checks recorded yet. Run <code class="mono bg-slate-100 px-1.5 py-0.5 rounded">./smartcheck.py --disk-id {{ disk.id }}</code>.</p>
+  {% endif %}
+</div>
+
+{% if new %}
+<div class="bg-white rounded-xl border border-slate-200 p-6 mb-6">
+  <div class="flex flex-wrap items-baseline justify-between gap-2 mb-4">
+    <h2 class="text-sm font-semibold text-slate-900 uppercase tracking-wide">Attribute comparison</h2>
+    <div class="text-xs text-slate-500">
+      <span class="px-1.5 py-0.5 rounded bg-blue-50 mono">{{ new.checked_at }}</span>
+      {% if base %}
+        vs <span class="px-1.5 py-0.5 rounded bg-slate-100 mono">{{ base.checked_at }}</span>
+        <span class="text-slate-400">({{ '{:,}'.format((new.power_on_hours or 0) - (base.power_on_hours or 0)) }} power-on h apart)</span>
+      {% else %}
+        <span class="text-slate-400">· only one check so far, nothing to compare against yet</span>
+      {% endif %}
+    </div>
+  </div>
+
+  <div class="overflow-x-auto">
+    <table class="w-full text-sm">
+      <thead>
+        <tr class="text-[10px] font-semibold text-slate-400 uppercase tracking-wide text-left border-b border-slate-200">
+          <th class="py-2 pr-3">ID</th>
+          <th class="py-2 pr-3">Attribute</th>
+          <th class="py-2 pr-3 text-right">Value</th>
+          <th class="py-2 pr-3 text-right">Worst</th>
+          <th class="py-2 pr-3 text-right">Thresh</th>
+          <th class="py-2 pr-3 text-right">Raw</th>
+          {% if base %}<th class="py-2 pr-3 text-right">Raw (base)</th><th class="py-2 text-right">Δ raw</th>{% endif %}
+        </tr>
+      </thead>
+      <tbody>
+      {% for r in compare %}
+        {% set row_cls = {'fail': 'bg-rose-50', 'worse': 'bg-rose-50', 'past': 'bg-amber-50'}.get(r.level, '') %}
+        <tr class="border-b border-slate-100 {{ row_cls }}">
+          <td class="py-1.5 pr-3 mono text-xs text-slate-400">{{ r.id }}</td>
+          <td class="py-1.5 pr-3 whitespace-nowrap">
+            {{ r.name }}
+            {% if r.level == 'fail' %}<span class="ml-1 text-[10px] font-semibold uppercase text-rose-700">at/below threshold</span>
+            {% elif r.level == 'worse' %}<span class="ml-1 text-[10px] font-semibold uppercase text-rose-700">rising</span>
+            {% elif r.level == 'past' %}<span class="ml-1 text-[10px] font-semibold uppercase text-amber-700">failed in the past</span>{% endif %}
+          </td>
+          {% if r.new %}
+            <td class="py-1.5 pr-3 text-right">{{ r.new.value }}</td>
+            <td class="py-1.5 pr-3 text-right">{{ r.new.worst }}</td>
+            <td class="py-1.5 pr-3 text-right text-slate-400">{{ r.new.thresh }}</td>
+            <td class="py-1.5 pr-3 text-right mono text-xs whitespace-nowrap">{{ r.new.raw_string }}</td>
+          {% else %}
+            <td colspan="4" class="py-1.5 pr-3 text-right text-xs text-slate-400">not reported</td>
+          {% endif %}
+          {% if base %}
+            <td class="py-1.5 pr-3 text-right mono text-xs text-slate-500 whitespace-nowrap">{{ r.base.raw_string if r.base else '—' }}</td>
+            <td class="py-1.5 text-right mono text-xs whitespace-nowrap {% if r.level == 'worse' %}text-rose-600 font-semibold{% elif r.delta %}text-slate-700{% else %}text-slate-300{% endif %}">
+              {% if r.delta is not none %}{{ '+' if r.delta > 0 }}{{ '{:,}'.format(r.delta) }}{% else %}—{% endif %}
+            </td>
+          {% endif %}
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  </div>
+</div>
+{% endif %}
+
+{% endblock %}

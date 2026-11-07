@@ -9,7 +9,8 @@ from urllib.parse import quote, unquote
 
 from flask import Flask, abort, jsonify, redirect, render_template, request, url_for
 
-from lib import db, fmt_bytes, fmt_mtime, init_db, reserved_advice
+from lib import (SMART_BAD_IF_RISING, db, fmt_bytes, fmt_mtime, init_db,
+                 reserved_advice, smart_attributes)
 
 app = Flask(__name__)
 app.jinja_env.filters["bytes"] = fmt_bytes
@@ -91,6 +92,71 @@ def view_disk(disk_id):
         subfolders=subfolders,
         crumbs=crumbs,
         folder_series=folder_series,
+    )
+
+
+SMART_COUNTERS = [
+    # (column, label, bad_if_rising)
+    ("power_on_hours", "Power-on h", False),
+    ("power_cycles", "Cycles", False),
+    ("load_cycles", "Load cycles", False),
+    ("temp_c", "Temp °C", False),
+    ("reallocated", "Reallocated", True),
+    ("pending", "Pending", True),
+    ("uncorrectable", "Uncorrectable", True),
+    ("udma_crc", "UDMA CRC", True),
+    ("ata_errors", "ATA errors", True),
+]
+
+
+@app.route("/disks/<int:disk_id>/smart")
+def disk_smart_history(disk_id):
+    with db() as conn:
+        disk = conn.execute("SELECT * FROM disks WHERE id=?", (disk_id,)).fetchone()
+        if not disk:
+            abort(404)
+        history = [dict(r) for r in conn.execute(
+            "SELECT * FROM smart_history WHERE disk_id=? ORDER BY checked_at DESC, id DESC",
+            (disk_id,),
+        )]
+    # Delta of each counter against the next-older snapshot that has a value.
+    for i, h in enumerate(history):
+        h["delta"] = {}
+        older = next((o for o in history[i + 1:] if o["available"]), None)
+        if h["available"] and older:
+            for col, _, _ in SMART_COUNTERS:
+                if h[col] is not None and older[col] is not None:
+                    h["delta"][col] = h[col] - older[col]
+
+    usable = [h for h in history if h["available"]]
+    by_id = {h["id"]: h for h in usable}
+    new = by_id.get(request.args.get("a", type=int)) or (usable[0] if usable else None)
+    base = by_id.get(request.args.get("b", type=int))
+    if base is None and new is not None:
+        base = next((h for h in usable if h["checked_at"] < new["checked_at"]
+                     or (h["checked_at"] == new["checked_at"] and h["id"] < new["id"])), None)
+
+    compare = []
+    if new:
+        na = smart_attributes(new["raw_json"])
+        ba = smart_attributes(base["raw_json"]) if base else {}
+        for aid in sorted(set(na) | set(ba)):
+            n, b = na.get(aid), ba.get(aid)
+            row = {"id": aid, "name": (n or b)["name"], "new": n, "base": b, "delta": None,
+                   "level": ""}
+            if n and b and isinstance(n["raw"], int) and isinstance(b["raw"], int):
+                row["delta"] = n["raw"] - b["raw"]
+            if n and n["thresh"] and n["value"] is not None and n["value"] <= n["thresh"]:
+                row["level"] = "fail"
+            elif aid in SMART_BAD_IF_RISING and (row["delta"] or 0) > 0:
+                row["level"] = "worse"
+            elif n and n["when_failed"]:
+                row["level"] = "past"
+            compare.append(row)
+
+    return render_template(
+        "smart_history.html", disk=disk, history=history, counters=SMART_COUNTERS,
+        new=new, base=base, compare=compare,
     )
 
 

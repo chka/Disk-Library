@@ -206,6 +206,7 @@
       {% if disk.smart_checked_at %}
         <span class="text-xs text-slate-400">checked {{ disk.smart_checked_at }}</span>
       {% endif %}
+      <a href="{{ url_for('disk_smart_history', disk_id=disk.id) }}" class="text-xs text-blue-600 hover:underline">history &amp; compare →</a>
       {% if disk.smart_available %}
         {% set health_cls = 'bg-emerald-100 text-emerald-700' if disk.smart_overall == 'PASSED' else 'bg-rose-100 text-rose-700' %}
         <span class="text-[10px] font-semibold uppercase tracking-wide px-2 py-1 rounded-full {{ health_cls }}">{{ disk.smart_overall }}</span>
